@@ -1,0 +1,39 @@
+---
+title: "IOS Mobile App Analysis"
+output: html_notebook
+---
+
+### IOS Mobile App Analysis
+#### Team 4 B for BA780
+Team members:
+Yuhong Lu, Xiaohan Mei, Ziyan Pei, Peng Yuan, Mengqing Zhang, Jiayuan Zou
+
+```{r echo=TRUE}
+library(tidyverse)
+library(readr)
+library(magrittr)
+library(ggplot2)
+```
+
+##### Data Cleaning & Merge
+```{r echo=TRUE}
+AppleStore <- read_csv("AppleStore.csv")
+descript <- read_csv("appleStore_description.csv")
+# Apple Store
+AppleStore$currency <- as.factor(AppleStore$currency)
+write.csv(AppleStore,'AppleStore.csv')
+# Get primary key - ID
+AppleStore <- read_csv('AppleStore.csv')
+AppleStore %>% select(id) %>% group_by(id) %>% summarize(count=n()) %>% filter(count>1)
+AppleStore %>% select(track_name) %>% group_by(track_name) %>% summarize(count=n()) %>% filter(count>1)
+descript %>% select(id) %>% group_by(id) %>% summarize(count=n()) %>% filter(count>1)
+descript %>% select(track_name) %>% group_by(track_name) %>% summarize(count=n()) %>% filter(count>1)
+# the primary key is ID
+# Merge two dataset
+AP <- AppleStore %>% left_join(descript, by='id') %>% 
+  select(everything(),-X1_1, -size_bytes.x,-track_name.y) %>% rename(size_byte=size_bytes.y)
+AP_omit <- na.omit(AP)
+any(is.na(AP_omit))
+write.csv(AP_omit,'AP_omit.csv')
+```
+
