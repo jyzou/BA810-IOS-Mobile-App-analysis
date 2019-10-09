@@ -13,6 +13,7 @@ library(tidyverse)
 library(readr)
 library(magrittr)
 library(ggplot2)
+library(formattable)
 ```
 
 ##### Data Cleaning & Merge
@@ -36,6 +37,8 @@ AP_omit <- na.omit(AP)
 any(is.na(AP_omit))
 write.csv(AP_omit,'AP_omit.csv')
 AP_omit
-
+hd <- head(AP_omit) 
+hd
+glimpse(AP_omit)
 ```
 
