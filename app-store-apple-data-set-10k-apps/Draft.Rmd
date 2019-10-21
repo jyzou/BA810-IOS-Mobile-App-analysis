@@ -42,3 +42,10 @@ hd
 glimpse(AP_omit)
 ```
 
+
+
+
+```{r}
+theme_set(theme_bw())
+```
+

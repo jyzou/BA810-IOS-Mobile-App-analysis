@@ -1,0 +1,345 @@
+---
+title: "IOS App Rating Modeling & Analysis"
+author: "Group 4B Yuhong Lu, Xiaohan Mei, Ziyan Pei,Peng Yuan, Mengqing Zhang, Jiayuan Zou"
+date: "Oct 15th 2019"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+### Load packages and environment
+```{r message=FALSE, warning=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(randomForest)
+library(gbm)
+library(readr)
+library(glmnet)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(magrittr)
+theme_set(theme_bw())
+```
+
+### Data Cleaning
+
+```{r message=FALSE, warning=FALSE}
+ap_omit <- read_csv('AP_omit.csv')
+# Remove the '+' in `cont_rating` column so that the data 
+# could be read by r
+ap_omit$cont_rating <- str_replace(ap_omit$cont_rating, "[+]", "")
+# change the class of variables in order to generate matrix and model for the further use
+ap_omit$vpp_lic <- as.factor(ap_omit$vpp_lic)
+ap_omit$cont_rating <- as.numeric(ap_omit$cont_rating)
+ap_omit$prime_genre <- as.factor(ap_omit$prime_genre)
+```
+
+### Descriptive Statistics 
+##### Distribution of Categories
+```{r}
+ggplot(data=ap_omit) +
+  geom_bar(aes(x=prime_genre, fill=prime_genre),show.legend = FALSE)+
+  labs(x = "Categories", y = "Count",
+        title = "The Distribution of Categories")+ 
+  coord_flip() + theme_bw()
+```
+This bar chart shows the number of the apps are stored in the apple store and what categories that they belong to. It can tell us what's the majority category of apps that people are used right now, and which categories of apps will attract people to download most. 
+
+##### Distribution of User Rating
+```{r}
+ggplot(data=ap_omit) +
+  geom_bar(aes(x=user_rating),show.legend = FALSE)+
+  labs(x = "Rating", y = "Count",
+        title = "The Distribution of User Rating")+ 
+  coord_flip() + theme_bw()
+```
+
+This bar chart shows the distribution of user rating. When we are using ios apps, based on whether we enjoy its function, we can give ratings from one star to five star, and in this chart, we can tell, the number of comments for each level of rating. As 4.5 star is the most common rating, many people also give 0 star. 
+
+##### Categories VS Average Rating(descending)
+```{r}
+avg_categ <- ap_omit%>%
+  group_by(prime_genre)%>%
+  summarise(average_rating = mean(user_rating))%>%
+  arrange(desc(average_rating)) 
+
+ggplot(data = avg_categ, aes(reorder(prime_genre,
+                                     average_rating),
+                             y = average_rating, fill = average_rating))+
+  geom_bar(stat = "identity", show.legend = FALSE)+
+  labs (x = "Categories", y = "Average Rating",
+        title = "Categories VS Average Rating") + 
+  coord_flip()
+```
+The Categories VS Average Rating shows that in each specific category, what rate people usually give out. For example, the productivty and music category are the top two categories which get almost four out of five stars. And catelogs are the lowest category that only get a little bit over two points.
+
+
+##### Categories VS Average Rating(number of)
+```{r}
+rating_cate <- ap_omit%>%
+   group_by(prime_genre)%>%
+  summarize(average_rating = mean(user_rating, na.rm = TRUE),
+            rating_count = sum(rating_count_tot, na.rm = TRUE)) %>% 
+   print
+
+ggplot(data = rating_cate, mapping = aes(x = prime_genre, y = average_rating)) +
+  geom_point(aes(size = rating_count), alpha = 1/4) +
+  labs(title = "Categories VS Average Rating",
+       caption = "The circle size shows the number of ratings.") +
+  theme(text = element_text(size = 10),
+      axis.text.x = element_text(angle = 45, hjust = 1, vjust = 0.8))
+```
+This chart also shows the relationship between categories and user rating but in a more visual way. The circle size shows the number of ratings and if the size is large and up high means this category gets lots of good ratings.
+
+
+##### The Distribution of Categories by Type(Free and Paid)
+```{r}
+type_count_cate <- ap_omit%>%
+  mutate(type=ifelse(price==0,"free","paid"))%>%
+  group_by(type,prime_genre)%>%
+  summarise(count=n())
+
+ggplot(data=type_count_cate,aes(reorder(prime_genre,count),y=count)) +
+  geom_bar(stat = "identity") +
+  labs (x="Categories", y="Count",
+        title="The Distribution of Categories by Type") +
+  coord_flip() +
+  facet_wrap(~type)
+```
+There are free/paid, two different type of apps in the apple store, and this chart analyze the number of free and paid apps in different categories. We can tell game related apps occupied a huge proportion of the overall market share and the second top category will be entertainment apps while the least is catalog apps. 
+
+
+##### The Distribution of User Rating VS Categories by Type(Free and Paid)
+```{r}
+type_rating_cate <- ap_omit%>%
+  mutate(type = ifelse(price == 0, "free", "paid"))%>%
+  group_by(type, prime_genre)%>%
+  summarise(average_rating = mean(user_rating))
+
+ggplot(data = type_rating_cate, aes(reorder(prime_genre, average_rating), y = average_rating)) +
+  geom_bar(stat = "identity",aes(fill=prime_genre),show.legend = F) +
+  labs (x = "Categories", y = "Average Rating",
+        title = "Average Rating VS Categories by Type") +
+  coord_flip() +
+  facet_wrap(~type)
+```
+In this chart, we added average rating as the third variable into comparision. It is more obvious for us to tell the difference of the rating between free and paid apps in the same category. The top three paid categories that get high ratings are shopping, productivity, and music. For these apps there aren't a significant difference between free and paid apps. And for catalogs, the free apps only gets around two out of five, while the paid apps gets almost four point five out of five.
+
+```{r}
+ggplot(data = type_rating_cate, aes(x = prime_genre, y = average_rating, fill=type))+
+  geom_bar(stat = "identity", position = position_dodge())+
+  labs (x = "Categories", y = "Average Rating",
+        title = "Average Rating VS Categories by Type")+
+  theme(text = element_text(size=10),
+        axis.text.x = element_text(angle=45,hjust=1,vjust=0.8))
+```
+This chart shows the same relationship as the previous one but in a different version. It put the free and paid apps of the same category side by side and mark the free and paid apps into two different colors. It would be more obvious to analyze the relationship different variables.
+
+### Test and Train data split
+```{r}
+# this is needed to create reproducible results,
+# otherwise your random split will be different each time you run the code
+set.seed(12345)
+# This will split into train and test 70-30
+ap_omit$train <- sample(c(0, 1), nrow(ap_omit), replace = TRUE, prob = c(.3, .7))
+ap_test <- ap_omit %>% filter(train == 0)
+ap_train <- ap_omit %>% filter(train == 1)
+y_train <- ap_train$user_rating
+y_test <- ap_test$user_rating
+```
+
+
+###### Create the variable that we use
+In this project, we want to predict how the rating for a specific APP would be given 9 independent variables. Therefore, we set up `user_rating` as our dependent variable; 9 independent variables that we adopted are  `price`, `rating_count_tot` (the number of ratings for an App), `cont_rating` (content rating), `sup_devices.num` (number of supporting devices), `size_bytes` (the size of app in bytes), `prime_genre` (the category of the app), `ipadSc_urls.num`(Number of screenshots showed for display),
+`lang.num` (Number of supported languages), and `vpp_lic`(Vpp Device Based Licensing Enabled,1 means APP uses device-based liscence, 0 means APP uses apple-id based liscence).
+
+``` {r}
+f1 <- as.formula(user_rating~ price + rating_count_tot +
+                   cont_rating +sup_devices.num +size_byte+
+                  prime_genre+ipadSc_urls.num+lang.num+vpp_lic)
+```
+
+
+### Linear Regression without cross validation
+```{r}
+ap_lm <- lm(f1, ap_train)
+yhat_train_lm <- predict(ap_lm)
+mse_train_lm <- mean((y_train - yhat_train_lm)^2)
+yhat_test_lm <- predict(ap_lm, ap_test)
+mse_test_lm <- mean((y_test - yhat_test_lm)^2)
+coef(ap_lm)
+mse_train_lm
+mse_test_lm
+```
+We first tried to use the linear regression without cross validation, and get the train and test mse, but we found that the test mse is less then the train mse, then we try to use the cross validation to get a better result.
+
+
+### Linear regression with cross validation
+```{r}
+set.seed(12345)
+
+ap_folds <- createFolds(ap_train$user_rating, k = 10)
+k <- length(ap_folds)
+lmmse <- data.frame()
+model <- list()
+for(i in 1 : k){
+  train.data <- ap_train[-ap_folds[[i]], ]
+  valid.data <- ap_train[ap_folds[[i]], ]
+  train_y <- y_train[-ap_folds[[i]]]
+  valid_y <- y_train[ap_folds[[i]]]
+  model[[i]] <- lm(f1, train.data)
+  y_train_hat <- predict(model[[i]], train.data)
+  y_valid_hat <- predict(model[[i]], valid.data)
+  lmmse[i, 1] <- mean((y_train_hat - train_y) ^ 2)
+  lmmse[i, 2] <- mean((y_valid_hat - valid_y) ^ 2)
+}
+names(lmmse) <- c('Train.MSEs', 'Valid.MSEs')
+lmmse.min.index <- which.min(lmmse$Valid.MSEs)
+lmmse[lmmse.min.index, ]
+
+mse_test <- mean((predict(model[[lmmse.min.index]], ap_test) - ap_test$user_rating) ^ 2)
+mse_test
+
+summary(model[[lmmse.min.index]])
+```
+
+
+In this section, we use Cross Validation to train the better Linear Regression Model. By using the For Loop, we can split the training data into 10 folds and using each of the fold for training the model. As the result, we can got a model with the lowest validation MSE = 1.823. Then we got the train MSE = 2.05. Though the train MSE is higher than our validation MSE, which indicates that our model might not be strong, our linear regression model with cv is not overfitting. Also, its MSE are lower than linear regression without cv. 
+
+
+### Shrinkage Analysis 
+Use ridge and lasso model get mse, then we compare the models by mse.
+### Ridge 
+```{r}
+x1_train <- model.matrix(f1, ap_train)[, -1]
+x1_test <- model.matrix(f1, ap_test)[, -1]
+ap_ridge <- cv.glmnet(x1_train, y_train, alpha = 0, nfolds = 10)
+coef(ap_ridge)
+yhat_train_ridge <- predict(ap_ridge, x1_train, s = ap_ridge$lambda.min)
+mse_train_ridge <- mean((y_train - yhat_train_ridge)^2)
+yhat_test_ridge <- predict(ap_ridge,x1_test,s=ap_ridge$lambda.min)
+mse_test_ridge <- mean((y_test-yhat_test_ridge)^2)
+mse_train_ridge
+mse_test_ridge
+```
+
+
+### Lasso
+```{r}
+ap_lasso <- cv.glmnet(x1_train, y_train, alpha = 1, nfolds = 10)
+yhat_train_lasso <- predict(ap_lasso, x1_train, s = ap_lasso$lambda.min)
+yhat_test_lasso <- predict(ap_lasso,x1_test,s=ap_lasso$lambda.min)
+mse_train_lasso <- mean((y_train - yhat_train_lasso)^2)
+mse_test_lasso <- mean((y_test-yhat_test_lasso)^2)
+coef(ap_lasso)
+mse_train_lasso
+mse_test_lasso
+```
+While MSE for validation set of Ridge is lower than that of Lasso, Lasso is more interpretable by eliminating most of coefficients, and only keeps 9 variables (including dummy variables that generated by `prime_genre`). 
+
+### Tree - Regression Tree
+
+```{r}
+#Regression tree
+ fit.tree <- rpart(f1, 
+ ap_train, 
+ control = rpart.control(cp = 0.001)) 
+ par(xpd = TRUE) 
+
+## Printcp will tell you what the cp of spliting into 
+## diffrent number layer and the xerror and xstd of each cp.
+printcp(fit.tree)
+## use the following method to choose the cp with the smallest xerror
+fit.tree$cptable[which.min(fit.tree$cptable[,"xerror"]),"CP"]
+## Build the tree model with the cp which 
+# has smallest xerror
+tree2 <- prune(fit.tree, cp= fit.tree$cptable[which.min(fit.tree$cptable[,"xerror"]),"CP"])
+## Make the visuallization of regreesion tree
+rpart.plot(tree2)
+```
+
+```{r}
+## MSE of train
+tree.pred.train = predict(tree2,ap_train)
+mean((tree.pred.train-ap_train$user_rating)^2)
+## MSE of test
+tree.pred.test = predict(tree2,ap_test)
+mean((tree.pred.test-ap_test$user_rating)^2) 
+```
+```{r}
+printcp(tree2)
+```
+After prune useing the best parameter cp with smallest xerror, we can find that the variables acatually used in tree construction is `prime_genre`,`rating_count_tot` and `size_byte`. The MSE of train is 0.3956153 and the MSE of test is 0.39381.
+
+
+### Random Forest
+```{r}
+#decide ntree by the plot of error vs ntree
+error.rf <- randomForest(f1, data = ap_omit , subset = (1:nrow(ap_omit))[ap_omit$train==1])
+plot(error.rf)
+```
+
+This plot shows the error of the random forest model. As the number of trees increases, the error approaches around 0.3. Thus we choose ntree =300 into the randomForest function.
+
+```{r}
+fit_rf <- randomForest(f1,
+                       ap_train,
+                       ntree=300,
+                       do.trace=F)
+
+varImpPlot(fit_rf)
+yhat_rf <- predict(fit_rf, ap_train)
+train_mse_rf <- mean((yhat_rf - ap_train$user_rating) ^ 2)
+print(train_mse_rf)
+
+yhat_rf <- predict(fit_rf, ap_test)
+test_mse_rf <- mean((yhat_rf - ap_test$user_rating) ^ 2)
+print(test_mse_rf)
+```
+
+The importance of variables plot shows important variables that are ordered from top to bottom as most-to-least important. Therefore, the most important variables are at the top, which is `rating_count_tot`. Other 3 important variables are `size_byte`, `prime_genre` and `ipadSc_urls.num`.
+
+### Boosting
+```{r message=FALSE, warning=FALSE,echo=TRUE}
+# Use gbm.step function in dismo package to fit the boosting model
+library(dismo)
+# first, generate a train dataset for use
+ap_train2 <- subset(ap_train,select = c('price','rating_count_tot','cont_rating',
+                                    'sup_devices.num','size_byte','prime_genre',
+                                    'ipadSc_urls.num','lang.num','vpp_lic','user_rating'))
+ap_train2 <- as.data.frame(ap_train2)
+# train boosting model, with learning.rate =0.01
+# use full train dataset 
+fit_btree <- gbm.step(data=ap_train2, gbm.x =1:9, 
+                      gbm.y = 10, tree.complexity = 5,
+                      family='gaussian',learning.rate = 0.01,
+                      bag.fraction = 1)
+#relevant significance of variables 
+relative.influence(fit_btree,n.trees=750)
+#calculate train and test mse
+yhat_btree <- predict(fit_btree, ap_train, n.trees = 750)
+mse_btree <- mean((yhat_btree - y_train) ^ 2)
+yhat_btree_test <- predict(fit_btree,ap_test,n.trees=750)
+mse_btree_test <- mean((yhat_btree_test-y_test)^2)
+print(mse_btree)
+print(mse_btree_test)
+```
+
+Last, we adopted boosting model. To lower our computational cost, we use gbm.step with learning rate of 0.01 to select the best number of trees with the lowest mse, and we can see that from the table, 750 would be the most optimal number of trees within the 0.01 learning rate. 
+Then, we computed the significance level and MSEs for train and validation sets. As other models show, `rating_count_tot` is the most predictable predictor. Then are `prime_genre` and `size_byte`. 
+Our MSE for train set is 0.3412, and for validation set is 0.3679. 
+
+### Summary
+For overall analysis, the model with the lowest MSE for validation/test set is boosting. 
+However, considering the level of interpretability, we may adopt the tree model, whose MSE is slightly higher than boosting (0.3938 for validation set of tree vs. 0.3679 for validation set of boosting) but more interpretable, when we have audience who have no technical background. 
+
+The biggest challenge we faced is to create k-fold cross validation for linear regression and choose the number of trees that should be used for boosting by gbm.step. 
+
+The lessons that we have learned that could be put into practice in the future is that for machine learning model, the trade-off between interpretability and flexibility is very important. Depends on our audience and the business context/academic context, we should adopt different models - since right now we do not have a perfect model that is both ideal for interpretability and flexibility. 
+
+
+
+
